@@ -28,10 +28,25 @@ pub const Op = struct {
     pub const i64_load: u8 = 0x29;
     pub const f32_load: u8 = 0x2A;
     pub const f64_load: u8 = 0x2B;
+    // Narrow loads
+    pub const i32_load8_s: u8 = 0x2C;
+    pub const i32_load8_u: u8 = 0x2D;
+    pub const i32_load16_s: u8 = 0x2E;
+    pub const i32_load16_u: u8 = 0x2F;
+    pub const i64_load8_s: u8 = 0x30;
+    pub const i64_load8_u: u8 = 0x31;
+    pub const i64_load16_s: u8 = 0x32;
+    pub const i64_load16_u: u8 = 0x33;
+
+    // Stores
     pub const i32_store: u8 = 0x36;
     pub const i64_store: u8 = 0x37;
     pub const f32_store: u8 = 0x38;
     pub const f64_store: u8 = 0x39;
+    pub const i32_store8: u8 = 0x3A;
+    pub const i32_store16: u8 = 0x3B;
+    pub const i64_store8: u8 = 0x3C;
+    pub const i64_store16: u8 = 0x3D;
 
     // Constants
     pub const i32_const: u8 = 0x41;

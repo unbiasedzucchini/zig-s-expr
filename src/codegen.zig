@@ -5,6 +5,7 @@ const Node = ast.Node;
 const NodeIndex = ast.NodeIndex;
 const ValType = ast.ValType;
 const BinOpKind = ast.BinOpKind;
+const MemWidth = ast.MemWidth;
 const Ast = ast.Ast;
 const Param = ast.Param;
 const Op = wasm.Op;
@@ -46,6 +47,8 @@ pub const Codegen = struct {
     type_sigs: std.ArrayList(TypeSig),
     type_map: std.HashMap(u64, u32, std.hash_map.AutoContext(u64), std.hash_map.default_max_load_percentage),
     has_memory: bool,
+    memory_pages: u32,
+    export_memory: bool,
 
     // Imports
     imports: std.ArrayList(ImportInfo),
@@ -75,6 +78,8 @@ pub const Codegen = struct {
             .type_sigs = std.ArrayList(TypeSig).init(allocator),
             .type_map = std.HashMap(u64, u32, std.hash_map.AutoContext(u64), std.hash_map.default_max_load_percentage).init(allocator),
             .has_memory = false,
+            .memory_pages = 1,
+            .export_memory = false,
             .imports = std.ArrayList(ImportInfo).init(allocator),
             .import_count = 0,
             .locals = std.StringHashMap(LocalInfo).init(allocator),
@@ -164,7 +169,15 @@ pub const Codegen = struct {
                     func_idx += 1;
                 },
                 .export_dir => |name| {
-                    try self.exports.append(name);
+                    if (std.mem.eql(u8, name, "memory")) {
+                        self.export_memory = true;
+                    } else {
+                        try self.exports.append(name);
+                    }
+                },
+                .memory_decl => |pages| {
+                    self.memory_pages = pages;
+                    self.has_memory = true;
                 },
                 .import_fn => {}, // already handled
                 else => {},
@@ -176,6 +189,7 @@ pub const Codegen = struct {
     }
 
     fn checkForMemoryOps(self: *Codegen) bool {
+        if (self.export_memory) return true;
         for (self.tree.nodes.items) |node| {
             switch (node) {
                 .load, .store => return true,
@@ -288,7 +302,7 @@ pub const Codegen = struct {
             },
             .load => |ld| ld.typ,
             .local_var, .local_set, .while_loop, .store => null,
-            .fn_def, .export_dir, .import_fn => null,
+            .fn_def, .export_dir, .import_fn, .memory_decl => null,
         };
     }
 
@@ -400,28 +414,49 @@ pub const Codegen = struct {
             },
             .load => |ld| {
                 try self.emitExpr(ld.addr);
-                try w.writeByte(switch (ld.typ) {
-                    .i32 => Op.i32_load,
-                    .i64 => Op.i64_load,
-                    .f32 => Op.f32_load,
-                    .f64 => Op.f64_load,
-                });
-                try wasm.encodeLEB128(w, ld.typ.alignLog2()); // alignment
+                if (ld.width == .full) {
+                    try w.writeByte(switch (ld.typ) {
+                        .i32 => Op.i32_load,
+                        .i64 => Op.i64_load,
+                        .f32 => Op.f32_load,
+                        .f64 => Op.f64_load,
+                    });
+                    try wasm.encodeLEB128(w, ld.typ.alignLog2());
+                } else {
+                    // Narrow load — currently only i32 narrow loads
+                    try w.writeByte(switch (ld.width) {
+                        .@"8_u" => Op.i32_load8_u,
+                        .@"8_s" => Op.i32_load8_s,
+                        .@"16_u" => Op.i32_load16_u,
+                        .@"16_s" => Op.i32_load16_s,
+                        .full => unreachable,
+                    });
+                    try wasm.encodeLEB128(w, ld.width.alignLog2());
+                }
                 try wasm.encodeLEB128(w, 0); // offset
             },
             .store => |st| {
                 try self.emitExpr(st.addr);
                 try self.emitExpr(st.value);
-                try w.writeByte(switch (st.typ) {
-                    .i32 => Op.i32_store,
-                    .i64 => Op.i64_store,
-                    .f32 => Op.f32_store,
-                    .f64 => Op.f64_store,
-                });
-                try wasm.encodeLEB128(w, st.typ.alignLog2());
+                if (st.width == .full) {
+                    try w.writeByte(switch (st.typ) {
+                        .i32 => Op.i32_store,
+                        .i64 => Op.i64_store,
+                        .f32 => Op.f32_store,
+                        .f64 => Op.f64_store,
+                    });
+                    try wasm.encodeLEB128(w, st.typ.alignLog2());
+                } else {
+                    try w.writeByte(switch (st.width) {
+                        .@"8_u", .@"8_s" => Op.i32_store8,
+                        .@"16_u", .@"16_s" => Op.i32_store16,
+                        .full => unreachable,
+                    });
+                    try wasm.encodeLEB128(w, st.width.alignLog2());
+                }
                 try wasm.encodeLEB128(w, 0);
             },
-            .fn_def, .export_dir, .import_fn => {},
+            .fn_def, .export_dir, .import_fn, .memory_decl => {},
         }
     }
 
@@ -633,16 +668,17 @@ pub const Codegen = struct {
             var sec = WasmWriter.init(self.allocator);
             try wasm.encodeLEB128(sec.writer(), 1); // 1 memory
             try sec.writeByte(0x00); // no max
-            try wasm.encodeLEB128(sec.writer(), 1); // 1 initial page
+            try wasm.encodeLEB128(sec.writer(), self.memory_pages);
             try output.writeSection(5, sec.buf.items);
             sec.deinit();
         }
 
         // Export section (id=7)
-        if (self.exports.items.len > 0 or self.has_memory) {
+        const need_mem_export = self.has_memory and self.export_memory;
+        if (self.exports.items.len > 0 or need_mem_export) {
             var sec = WasmWriter.init(self.allocator);
             var total_exports: u32 = @intCast(self.exports.items.len);
-            if (self.has_memory) total_exports += 1;
+            if (need_mem_export) total_exports += 1;
             try wasm.encodeLEB128(sec.writer(), total_exports);
 
             for (self.exports.items) |name| {
@@ -653,7 +689,7 @@ pub const Codegen = struct {
                 try wasm.encodeLEB128(sec.writer(), fi.index);
             }
 
-            if (self.has_memory) {
+            if (need_mem_export) {
                 const mem_name = "memory";
                 try wasm.encodeLEB128(sec.writer(), mem_name.len);
                 try sec.writeAll(mem_name);

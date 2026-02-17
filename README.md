@@ -91,11 +91,25 @@ Operators dispatch to the correct WASM opcode based on operand type.
 ### Memory
 
 ```lisp
+(memory 4)              ;; declare 4 pages (256KB) of linear memory
+
 (load i32 addr)         ;; read i32 from linear memory
 (store i32 addr value)  ;; write i32 to linear memory
+
+;; Byte-level access
+(load8_u addr)          ;; load byte, zero-extend to i32
+(load8_s addr)          ;; load byte, sign-extend to i32
+(store8 addr value)     ;; store low byte of i32
+
+;; 16-bit access
+(load16_u addr)         ;; load 2 bytes, zero-extend to i32
+(store16 addr value)    ;; store low 2 bytes of i32
+
+(export memory)         ;; export memory to the host
 ```
 
-Memory is automatically exported when load/store are used.
+Memory is created when `(memory N)` is declared or when load/store ops are used (defaults to 1 page).
+Hex literals are supported: `0x10000`.
 
 ### Function Calls
 
@@ -118,6 +132,32 @@ See the [`examples/`](examples/) directory:
 - **factorial.sexpr** — iterative factorial with while loop
 - **fibonacci.sexpr** — fibonacci with if/else and block
 - **demo.sexpr** — abs, max, min, sum, is_prime, gcd
+- **echo.sexpr** — echo (wasmexec contract)
+- **upper.sexpr** — uppercase conversion (wasmexec contract)
+
+## wasmexec Contract
+
+zsexp can produce modules compatible with the [wasmexec contract](https://github.com/anthropics/courses):
+
+```lisp
+(memory 4)
+
+(fn run ((input_ptr i32) (input_len i32)) i32
+  (var output_ptr i32 0x20000)
+  ;; Write output length as u32 LE
+  (store i32 output_ptr input_len)
+  ;; Copy/transform bytes...
+  (var i i32 0)
+  (while (< i input_len)
+    (store8 (+ (+ output_ptr 4) i) (load8_u (+ input_ptr i)))
+    (set i (+ i 1)))
+  output_ptr)
+
+(export run)
+(export memory)
+```
+
+The contract: host writes input at `0x10000`, calls `run(0x10000, len)`, reads output from the returned pointer as `[u32 LE length][bytes...]`. No WASI, no imports, pure computation.
 
 ## Architecture
 

@@ -6,6 +6,7 @@ const TokenKind = @import("lexer.zig").TokenKind;
 const Node = ast.Node;
 const NodeIndex = ast.NodeIndex;
 const ValType = ast.ValType;
+const MemWidth = ast.MemWidth;
 const Param = ast.Param;
 const Ast = ast.Ast;
 const BinOpKind = ast.BinOpKind;
@@ -92,7 +93,7 @@ pub const Parser = struct {
         switch (self.current.kind) {
             .int_lit => {
                 const tok = self.bump();
-                const val = std.fmt.parseInt(i64, tok.text, 10) catch return error.UnexpectedToken;
+                const val = std.fmt.parseInt(i64, tok.text, 0) catch return error.UnexpectedToken;
                 return self.tree.addNode(.{ .int_literal = val });
             },
             .float_lit => {
@@ -134,8 +135,11 @@ pub const Parser = struct {
         if (std.mem.eql(u8, head, "if")) return self.parseIf();
         if (std.mem.eql(u8, head, "while")) return self.parseWhile();
         if (std.mem.eql(u8, head, "block")) return self.parseBlock();
-        if (std.mem.eql(u8, head, "load")) return self.parseLoad();
-        if (std.mem.eql(u8, head, "store")) return self.parseStore();
+        if (std.mem.eql(u8, head, "memory")) return self.parseMemoryDecl();
+        if (std.mem.eql(u8, head, "load")) return self.parseLoadFull();
+        if (std.mem.eql(u8, head, "store")) return self.parseStoreFull();
+        if (parseNarrowLoad(head)) |width| return self.parseLoadNarrow(width);
+        if (parseNarrowStore(head)) |width| return self.parseStoreNarrow(width);
 
         // Check binary operators
         if (parseBinOp(head)) |op| {
@@ -290,23 +294,60 @@ pub const Parser = struct {
         return self.tree.addNode(.{ .block = items.items });
     }
 
-    fn parseLoad(self: *Parser) ParseError!NodeIndex {
+    fn parseMemoryDecl(self: *Parser) ParseError!NodeIndex {
+        _ = self.bump(); // consume "memory"
+        const pages_tok = try self.expect(.int_lit);
+        const pages = std.fmt.parseInt(u32, pages_tok.text, 0) catch return error.UnexpectedToken;
+        _ = try self.expect(.rparen);
+        return self.tree.addNode(.{ .memory_decl = pages });
+    }
+
+    fn parseNarrowLoad(name: []const u8) ?MemWidth {
+        if (std.mem.eql(u8, name, "load8_u")) return .@"8_u";
+        if (std.mem.eql(u8, name, "load8_s")) return .@"8_s";
+        if (std.mem.eql(u8, name, "load16_u")) return .@"16_u";
+        if (std.mem.eql(u8, name, "load16_s")) return .@"16_s";
+        return null;
+    }
+
+    fn parseNarrowStore(name: []const u8) ?MemWidth {
+        if (std.mem.eql(u8, name, "store8")) return .@"8_u"; // width only, no sign
+        if (std.mem.eql(u8, name, "store16")) return .@"16_u";
+        return null;
+    }
+
+    fn parseLoadFull(self: *Parser) ParseError!NodeIndex {
         _ = self.bump(); // consume "load"
         const type_name = (try self.expect(.ident)).text;
         const typ = try parseValType(type_name);
         const addr = try self.parseExpr();
         _ = try self.expect(.rparen);
-        return self.tree.addNode(.{ .load = .{ .typ = typ, .addr = addr } });
+        return self.tree.addNode(.{ .load = .{ .typ = typ, .width = .full, .addr = addr } });
     }
 
-    fn parseStore(self: *Parser) ParseError!NodeIndex {
+    fn parseLoadNarrow(self: *Parser, width: MemWidth) ParseError!NodeIndex {
+        _ = self.bump(); // consume "load8_u" etc.
+        const addr = try self.parseExpr();
+        _ = try self.expect(.rparen);
+        return self.tree.addNode(.{ .load = .{ .typ = .i32, .width = width, .addr = addr } });
+    }
+
+    fn parseStoreFull(self: *Parser) ParseError!NodeIndex {
         _ = self.bump(); // consume "store"
         const type_name = (try self.expect(.ident)).text;
         const typ = try parseValType(type_name);
         const addr = try self.parseExpr();
         const value = try self.parseExpr();
         _ = try self.expect(.rparen);
-        return self.tree.addNode(.{ .store = .{ .typ = typ, .addr = addr, .value = value } });
+        return self.tree.addNode(.{ .store = .{ .typ = typ, .width = .full, .addr = addr, .value = value } });
+    }
+
+    fn parseStoreNarrow(self: *Parser, width: MemWidth) ParseError!NodeIndex {
+        _ = self.bump(); // consume "store8" etc.
+        const addr = try self.parseExpr();
+        const value = try self.parseExpr();
+        _ = try self.expect(.rparen);
+        return self.tree.addNode(.{ .store = .{ .typ = .i32, .width = width, .addr = addr, .value = value } });
     }
 
     fn parseCall(self: *Parser) ParseError!NodeIndex {

@@ -102,6 +102,18 @@ pub const Lexer = struct {
             const start = self.pos;
             var is_float = false;
             if (c == '-') self.advance();
+            // Check for hex prefix 0x
+            if (self.pos + 1 < self.source.len and self.source[self.pos] == '0' and self.source[self.pos + 1] == 'x') {
+                self.advance(); // '0'
+                self.advance(); // 'x'
+                while (self.pos < self.source.len) {
+                    const d = self.source[self.pos];
+                    if ((d >= '0' and d <= '9') or (d >= 'a' and d <= 'f') or (d >= 'A' and d <= 'F')) {
+                        self.advance();
+                    } else break;
+                }
+                return .{ .kind = .int_lit, .text = self.source[start..self.pos], .line = start_line, .col = start_col };
+            }
             while (self.pos < self.source.len) {
                 const d = self.source[self.pos];
                 if (d >= '0' and d <= '9') {

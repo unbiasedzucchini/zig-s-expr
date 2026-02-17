@@ -50,6 +50,22 @@ pub const BinOpKind = enum {
     shr_s,
 };
 
+pub const MemWidth = enum {
+    full, // natural width of the type
+    @"8_u",
+    @"8_s",
+    @"16_u",
+    @"16_s",
+
+    pub fn alignLog2(self: MemWidth) u32 {
+        return switch (self) {
+            .full => unreachable, // use ValType.alignLog2
+            .@"8_u", .@"8_s" => 0,
+            .@"16_u", .@"16_s" => 1,
+        };
+    }
+};
+
 pub const Param = struct {
     name: []const u8,
     typ: ValType,
@@ -96,15 +112,18 @@ pub const Node = union(enum) {
     },
     load: struct {
         typ: ValType,
+        width: MemWidth,
         addr: NodeIndex,
     },
     store: struct {
         typ: ValType,
+        width: MemWidth,
         addr: NodeIndex,
         value: NodeIndex,
     },
 
     // Top-level
+    memory_decl: u32, // initial pages
     fn_def: struct {
         name: []const u8,
         params: []const Param,

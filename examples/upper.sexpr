@@ -1,0 +1,22 @@
+;; Uppercase: converts ASCII input to uppercase
+;; Satisfies the wasmexec contract
+
+(memory 4)
+
+(fn run ((input_ptr i32) (input_len i32)) i32
+  (var output_ptr i32 0x20000)
+  ;; Write output length
+  (store i32 output_ptr input_len)
+  ;; Convert each byte
+  (var i i32 0)
+  (while (< i input_len)
+    (var ch i32 (load8_u (+ input_ptr i)))
+    ;; If lowercase (97 <= ch <= 122), subtract 32
+    (if (and (>= ch 97) (<= ch 122))
+      (set ch (- ch 32)))
+    (store8 (+ (+ output_ptr 4) i) ch)
+    (set i (+ i 1)))
+  output_ptr)
+
+(export run)
+(export memory)

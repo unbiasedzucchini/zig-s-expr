@@ -1,0 +1,19 @@
+;; Echo: satisfies the wasmexec contract
+;; Host writes input at 0x10000, calls run(0x10000, len)
+;; run returns ptr to [output_len: u32 LE][output_bytes...]
+
+(memory 4)
+
+(fn run ((input_ptr i32) (input_len i32)) i32
+  (var output_ptr i32 0x20000)
+  ;; Write output length (4 bytes, little-endian = just store i32)
+  (store i32 output_ptr input_len)
+  ;; Copy input bytes to output+4
+  (var i i32 0)
+  (while (< i input_len)
+    (store8 (+ (+ output_ptr 4) i) (load8_u (+ input_ptr i)))
+    (set i (+ i 1)))
+  output_ptr)
+
+(export run)
+(export memory)
