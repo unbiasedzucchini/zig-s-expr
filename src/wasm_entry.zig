@@ -1,12 +1,14 @@
-//! WASM entry point for the zsexp compiler.
-//! Exposes the compiler as a WASM module so it can run in the browser.
+//! WASM entry point for the zsexp compiler (wasmexec contract).
+//!
+//! Contract:
+//!   - Host writes source text at 0x10000, calls run(0x10000, len)
+//!   - run() returns pointer to [output_len: u32 LE][output_bytes...]
+//!   - Exports: run, memory
 
 const std = @import("std");
-const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
 const Codegen = @import("codegen.zig").Codegen;
 
-/// Compile source to WASM bytes (same as main.zig's compile).
 fn compile(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     var parser = Parser.init(allocator, source);
     var tree = try parser.parseProgram();
@@ -15,49 +17,34 @@ fn compile(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     return codegen.generate();
 }
 
-// --- Global state for the last compilation result ---
-var result_ptr: [*]u8 = undefined;
-var result_len: usize = 0;
+const OUTPUT_BASE: usize = 0x20000;
+
 var arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.wasm_allocator);
 
-/// Allocate `len` bytes in WASM linear memory. Returns pointer as i32.
-/// The caller (JS) writes the source text here.
-export fn alloc(len: usize) usize {
-    const slice = std.heap.wasm_allocator.alloc(u8, len) catch return 0;
-    return @intFromPtr(slice.ptr);
-}
-
-/// Free a previous allocation.
-export fn dealloc(ptr: [*]u8, len: usize) void {
-    std.heap.wasm_allocator.free(ptr[0..len]);
-}
-
-/// Compile the source at `src_ptr[0..src_len]`.
-/// Returns 1 on success, 0 on failure.
-/// On success, call `get_result_ptr()` and `get_result_len()` to read the output.
-export fn do_compile(src_ptr: [*]const u8, src_len: usize) u32 {
-    // Reset arena from previous compilation
+export fn run(input_ptr: [*]const u8, input_len: u32) u32 {
+    // Reset arena from any previous call
     arena.deinit();
     arena = std.heap.ArenaAllocator.init(std.heap.wasm_allocator);
-
     const allocator = arena.allocator();
-    const source = src_ptr[0..src_len];
 
-    const wasm_bytes = compile(allocator, source) catch {
-        return 0;
+    const source = input_ptr[0..input_len];
+
+    const wasm_bytes = compile(allocator, source) catch |err| {
+        // On error, write error name as output
+        const prefix = "error: ";
+        const name = @errorName(err);
+        const total = prefix.len + name.len;
+        const out: [*]u8 = @ptrFromInt(OUTPUT_BASE);
+        std.mem.writeInt(u32, out[0..4], @intCast(total), .little);
+        @memcpy(out[4 .. 4 + prefix.len], prefix);
+        @memcpy(out[4 + prefix.len .. 4 + total], name);
+        return @intCast(OUTPUT_BASE);
     };
 
-    result_ptr = wasm_bytes.ptr;
-    result_len = wasm_bytes.len;
-    return 1;
-}
+    // Write [u32 LE length][wasm bytes...] at OUTPUT_BASE
+    const out: [*]u8 = @ptrFromInt(OUTPUT_BASE);
+    std.mem.writeInt(u32, out[0..4], @intCast(wasm_bytes.len), .little);
+    @memcpy(out[4 .. 4 + wasm_bytes.len], wasm_bytes);
 
-/// Get pointer to the compiled WASM bytes.
-export fn get_result_ptr() [*]u8 {
-    return result_ptr;
-}
-
-/// Get length of the compiled WASM bytes.
-export fn get_result_len() usize {
-    return result_len;
+    return @intCast(OUTPUT_BASE);
 }
