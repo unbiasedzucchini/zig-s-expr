@@ -1,0 +1,16 @@
+;; Fibonacci - iterative
+(fn fib ((n i32)) i32
+  (if (<= n 1)
+    n
+    (block
+      (var a i32 0)
+      (var b i32 1)
+      (var i i32 2)
+      (while (<= i n)
+        (var tmp i32 (+ a b))
+        (set a b)
+        (set b tmp)
+        (set i (+ i 1)))
+      b)))
+
+(export fib)

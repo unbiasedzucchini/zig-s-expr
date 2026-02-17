@@ -1,0 +1,51 @@
+;; Demo: multiple functions with various features
+
+;; Absolute value
+(fn abs ((x i32)) i32
+  (if (< x 0) (- 0 x) x))
+
+;; Max of two numbers
+(fn max ((a i32) (b i32)) i32
+  (if (> a b) a b))
+
+;; Min of two numbers
+(fn min ((a i32) (b i32)) i32
+  (if (< a b) a b))
+
+;; Sum from 1 to n
+(fn sum_to ((n i32)) i32
+  (var acc i32 0)
+  (var i i32 1)
+  (while (<= i n)
+    (set acc (+ acc i))
+    (set i (+ i 1)))
+  acc)
+
+;; Is a number prime?
+;; Returns 1 if prime, 0 if not
+(fn is_prime ((n i32)) i32
+  (if (<= n 1)
+    0
+    (block
+      (var i i32 2)
+      (var result i32 1)
+      (while (and (<= (* i i) n) (== result 1))
+        (if (== (% n i) 0)
+          (set result 0))
+        (set i (+ i 1)))
+      result)))
+
+;; GCD using Euclidean algorithm
+(fn gcd ((a i32) (b i32)) i32
+  (while (!= b 0)
+    (var tmp i32 b)
+    (set b (% a b))
+    (set a tmp))
+  a)
+
+(export abs)
+(export max)
+(export min)
+(export sum_to)
+(export is_prime)
+(export gcd)

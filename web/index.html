@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zsexp — S-Expression → WebAssembly Playground</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Berkeley Mono', 'SF Mono', 'Menlo', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+  header { padding: 1rem 1.5rem; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.2rem; color: #58a6ff; }
+  header span { color: #8b949e; font-size: 0.85rem; }
+  .container { display: grid; grid-template-columns: 1fr 1fr; height: calc(100vh - 3.5rem); }
+  .panel { display: flex; flex-direction: column; }
+  .panel-header { padding: 0.5rem 1rem; background: #161b22; border-bottom: 1px solid #21262d; font-size: 0.8rem; color: #8b949e; display: flex; justify-content: space-between; align-items: center; }
+  textarea { flex: 1; background: #0d1117; color: #c9d1d9; border: none; padding: 1rem; font-family: inherit; font-size: 0.9rem; resize: none; outline: none; line-height: 1.6; tab-size: 2; }
+  .right-panel { border-left: 1px solid #21262d; }
+  #output { flex: 1; padding: 1rem; overflow-y: auto; font-size: 0.85rem; line-height: 1.6; }
+  .output-line { margin-bottom: 0.25rem; }
+  .ok { color: #3fb950; }
+  .err { color: #f85149; }
+  .info { color: #8b949e; }
+  .val { color: #d2a8ff; }
+  button { background: #238636; color: #fff; border: none; padding: 0.3rem 1rem; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.8rem; }
+  button:hover { background: #2ea043; }
+  .btn-group { display: flex; gap: 0.5rem; }
+  .toolbar { padding: 0.5rem 1rem; background: #161b22; border-bottom: 1px solid #21262d; display: flex; gap: 0.5rem; align-items: center; }
+  .toolbar label { font-size: 0.8rem; color: #8b949e; }
+  .toolbar input { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 0.2rem 0.5rem; border-radius: 3px; font-family: inherit; font-size: 0.8rem; width: 80px; }
+  select { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 0.3rem 0.5rem; border-radius: 3px; font-family: inherit; font-size: 0.8rem; }
+  @media (max-width: 768px) { .container { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } .right-panel { border-left: none; border-top: 1px solid #21262d; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>zsexp</h1>
+  <span>S-Expression → WebAssembly Compiler</span>
+</header>
+<div class="container">
+  <div class="panel">
+    <div class="panel-header">
+      <span>Source</span>
+      <div class="btn-group">
+        <select id="examples">
+          <option value="">Load example...</option>
+          <option value="add">add</option>
+          <option value="factorial">factorial</option>
+          <option value="fibonacci">fibonacci</option>
+          <option value="demo">demo (all features)</option>
+        </select>
+      </div>
+    </div>
+    <textarea id="source" spellcheck="false">;; Simple add function
+(fn add ((a i32) (b i32)) i32
+  (+ a b))
+
+(export add)</textarea>
+  </div>
+  <div class="panel right-panel">
+    <div class="panel-header">
+      <span>Output</span>
+      <div class="btn-group">
+        <button id="compile-btn">Compile &amp; Run</button>
+      </div>
+    </div>
+    <div class="toolbar">
+      <label>Call:</label>
+      <select id="fn-select"><option>compile first</option></select>
+      <label>Args:</label>
+      <input id="fn-args" type="text" value="2, 3" placeholder="1, 2, 3">
+      <button id="call-btn">Call</button>
+    </div>
+    <div id="output"></div>
+  </div>
+</div>
+<script type="module">
+const EXAMPLES = {
+  add: `;; Simple add function
+(fn add ((a i32) (b i32)) i32
+  (+ a b))
+
+(export add)`,
+  factorial: `;; Iterative factorial
+(fn factorial ((n i32)) i32
+  (var result i32 1)
+  (var i i32 1)
+  (while (<= i n)
+    (set result (* result i))
+    (set i (+ i 1)))
+  result)
+
+(export factorial)`,
+  fibonacci: `;; Fibonacci - iterative
+(fn fib ((n i32)) i32
+  (if (<= n 1)
+    n
+    (block
+      (var a i32 0)
+      (var b i32 1)
+      (var i i32 2)
+      (while (<= i n)
+        (var tmp i32 (+ a b))
+        (set a b)
+        (set b tmp)
+        (set i (+ i 1)))
+      b)))
+
+(export fib)`,
+  demo: `;; Demo: multiple functions
+
+(fn abs ((x i32)) i32
+  (if (< x 0) (- 0 x) x))
+
+(fn max ((a i32) (b i32)) i32
+  (if (> a b) a b))
+
+(fn sum_to ((n i32)) i32
+  (var acc i32 0)
+  (var i i32 1)
+  (while (<= i n)
+    (set acc (+ acc i))
+    (set i (+ i 1)))
+  acc)
+
+(fn is_prime ((n i32)) i32
+  (if (<= n 1)
+    0
+    (block
+      (var i i32 2)
+      (var result i32 1)
+      (while (and (<= (* i i) n) (== result 1))
+        (if (== (% n i) 0)
+          (set result 0))
+        (set i (+ i 1)))
+      result)))
+
+(fn gcd ((a i32) (b i32)) i32
+  (while (!= b 0)
+    (var tmp i32 b)
+    (set b (% a b))
+    (set a tmp))
+  a)
+
+(export abs)
+(export max)
+(export sum_to)
+(export is_prime)
+(export gcd)`
+};
+
+let wasmInstance = null;
+const output = document.getElementById('output');
+const source = document.getElementById('source');
+const fnSelect = document.getElementById('fn-select');
+const fnArgs = document.getElementById('fn-args');
+
+function log(text, cls = '') {
+  const div = document.createElement('div');
+  div.className = 'output-line ' + cls;
+  div.textContent = text;
+  output.appendChild(div);
+  output.scrollTop = output.scrollHeight;
+}
+
+function clear() { output.innerHTML = ''; }
+
+// We compile server-side via the zsexp binary
+async function compileAndRun() {
+  clear();
+  const src = source.value;
+  log('Compiling...', 'info');
+
+  try {
+    const resp = await fetch('/api/compile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: src
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      log('Compilation failed: ' + errText, 'err');
+      return;
+    }
+
+    const wasmBytes = await resp.arrayBuffer();
+    log(`Compiled: ${wasmBytes.byteLength} bytes`, 'ok');
+
+    const { instance } = await WebAssembly.instantiate(wasmBytes);
+    wasmInstance = instance;
+
+    // Populate function select
+    fnSelect.innerHTML = '';
+    const exports = Object.keys(instance.exports).filter(k => typeof instance.exports[k] === 'function');
+    for (const name of exports) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      fnSelect.appendChild(opt);
+    }
+
+    if (exports.length > 0) {
+      log(`Exported functions: ${exports.join(', ')}`, 'info');
+      // Auto-call the first function
+      callFunction();
+    }
+  } catch (e) {
+    log('Error: ' + e.message, 'err');
+  }
+}
+
+function callFunction() {
+  if (!wasmInstance) { log('Compile first!', 'err'); return; }
+  const name = fnSelect.value;
+  const argsStr = fnArgs.value.trim();
+  const args = argsStr ? argsStr.split(',').map(s => parseInt(s.trim())) : [];
+  try {
+    const fn = wasmInstance.exports[name];
+    if (!fn) { log(`No exported function '${name}'`, 'err'); return; }
+    const result = fn(...args);
+    log(`${name}(${args.join(', ')}) = ${result}`, 'val');
+  } catch (e) {
+    log(`Runtime error: ${e.message}`, 'err');
+  }
+}
+
+document.getElementById('compile-btn').addEventListener('click', compileAndRun);
+document.getElementById('call-btn').addEventListener('click', callFunction);
+document.getElementById('examples').addEventListener('change', (e) => {
+  if (e.target.value && EXAMPLES[e.target.value]) {
+    source.value = EXAMPLES[e.target.value];
+    e.target.value = '';
+  }
+});
+
+// Ctrl+Enter to compile
+source.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    compileAndRun();
+  }
+  // Tab inserts 2 spaces
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = source.selectionStart;
+    source.value = source.value.substring(0, start) + '  ' + source.value.substring(source.selectionEnd);
+    source.selectionStart = source.selectionEnd = start + 2;
+  }
+});
+</script>
+</body>
+</html>
